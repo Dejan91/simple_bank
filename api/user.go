@@ -78,8 +78,12 @@ type loginUserRequest struct {
 }
 
 type loginUserResponse struct {
-	AccessToken string       `json:"access_token"`
-	User        userResponse `json:"user"`
+	SessionID             string       `json:"session_id"`
+	AccessToken           string       `json:"access_token"`
+	AccessTokenExpiresAt  time.Time    `json:"access_token_expires_at"`
+	RefreshToken          string       `json:"refresh_token"`
+	RefreshTokenExpiresAt time.Time    `json:"refresh_token_expires_at"`
+	User                  userResponse `json:"user"`
 }
 
 func (s *Server) loginUser(c *gin.Context) {
@@ -105,7 +109,7 @@ func (s *Server) loginUser(c *gin.Context) {
 		return
 	}
 
-	accessToken, err := s.tokenMaker.CreateToken(
+	accessToken, accessPayload, err := s.tokenMaker.CreateToken(
 		user.Username,
 		s.config.AccessTokenDuration,
 	)
@@ -114,9 +118,33 @@ func (s *Server) loginUser(c *gin.Context) {
 		return
 	}
 
+	refreshToken, refreshPayload, err := s.tokenMaker.CreateToken(user.Username, s.config.RefreshTokenDuration)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
+	session, err := s.store.CreateSession(c, db.CreateSessionParams{
+		ID:           refreshPayload.ID,
+		Username:     user.Username,
+		RefreshToken: refreshToken,
+		UserAgent:    c.Request.UserAgent(),
+		ClientIp:     c.ClientIP(),
+		IsBlocked:    false,
+		ExpiresAt:    refreshPayload.ExpiredAt,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, errorResponse(err))
+		return
+	}
+
 	rsp := loginUserResponse{
-		AccessToken: accessToken,
-		User:        newUserResponse(user),
+		SessionID:             session.ID.String(),
+		AccessToken:           accessToken,
+		AccessTokenExpiresAt:  accessPayload.ExpiredAt,
+		RefreshToken:          refreshToken,
+		RefreshTokenExpiresAt: refreshPayload.ExpiredAt,
+		User:                  newUserResponse(user),
 	}
 
 	c.JSON(http.StatusOK, rsp)
