@@ -24,5 +24,13 @@ services:
     environment:
       - DB_SOURCE=postgresql://root:secret@postgres:5432/simple_bank?sslmode=disable
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis:/usr/local/etc/redis
+
 volumes:
   db:
+  redis:
